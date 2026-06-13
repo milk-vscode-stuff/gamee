@@ -3,45 +3,17 @@
 <head>
     <title>Multiplayer Game</title>
     <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background: black;
-            font-family: Arial;
-        }
-
-        canvas {
-            display: block;
-            background: black;
-        }
-
+        body { margin: 0; overflow: hidden; background: black; font-family: Arial; }
+        canvas { display: block; background: black; }
         #menu {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            background: black;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            color: white;
+            position: absolute; width: 100%; height: 100%;
+            background: black; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; color: white;
         }
-
-        input, button {
-            padding: 10px;
-            margin: 5px;
-            border: none;
-            border-radius: 6px;
-        }
-
-        button {
-            background: #5865f2;
-            color: white;
-            cursor: pointer;
-        }
+        input, button { padding: 10px; margin: 5px; border: none; border-radius: 6px; }
+        button { background: #5865f2; color: white; cursor: pointer; }
     </style>
 </head>
-
 <body>
 
 <div id="menu">
@@ -63,139 +35,116 @@ canvas.width = innerWidth;
 canvas.height = innerHeight;
 
 let id = Math.random().toString(36).substr(2);
-
 let players = {};
 let renderPlayers = {};
 let walls = [];
-
 let started = false;
 let myName = "";
-
 let myPlayer = { x: 200, y: 200, speed: 4 };
-
 const keys = {};
 
-// KEY INPUT
+// Track which direction the player is facing (default: up)
+let facing = "up";
+
 window.addEventListener("keydown", (e) => {
     keys[e.key] = true;
 
-    if (e.key.toLowerCase() === "u") {
-        placeWall();
-    }
+    // Update facing direction when a movement key is pressed
+    if (e.key === "w" || e.key === "ArrowUp")    facing = "up";
+    if (e.key === "s" || e.key === "ArrowDown")  facing = "down";
+    if (e.key === "a" || e.key === "ArrowLeft")  facing = "left";
+    if (e.key === "d" || e.key === "ArrowRight") facing = "right";
+
+    if (e.key.toLowerCase() === "u") placeWall();
+    if (e.key.toLowerCase() === "k") clearWalls();  // ← NEW
 });
 
 window.addEventListener("keyup", e => keys[e.key] = false);
 
-// JOIN
 function start() {
     myName = document.getElementById("nameInput").value;
     document.getElementById("menu").style.display = "none";
-
     socket.emit("join", { id, name: myName });
     started = true;
 }
 
-// RECEIVE PLAYERS
 socket.on("players_update", (data) => {
     players = data;
-
     for (let p in players) {
         if (!renderPlayers[p]) {
-            renderPlayers[p] = {
-                x: players[p].x,
-                y: players[p].y
-            };
+            renderPlayers[p] = { x: players[p].x, y: players[p].y };
         }
     }
 });
 
-// RECEIVE WALLS
 socket.on("walls_update", (data) => {
     walls = data;
 });
 
-// LERP
-function lerp(a, b, t) {
-    return a + (b - a) * t;
-}
+function lerp(a, b, t) { return a + (b - a) * t; }
 
-// COLLISION
 function collides(x, y) {
     for (let w of walls) {
-        if (
-            x < w.x + w.w &&
-            x + 30 > w.x &&
-            y < w.y + w.h &&
-            y + 30 > w.y
-        ) {
-            return true;
-        }
+        if (x < w.x + w.w && x + 30 > w.x && y < w.y + w.h && y + 30 > w.y) return true;
     }
     return false;
 }
 
-// MOVE
 function update() {
     if (!started) return;
 
     let dx = 0, dy = 0;
-
-    if (keys["w"] || keys["ArrowUp"]) dy -= 1;
-    if (keys["s"] || keys["ArrowDown"]) dy += 1;
-    if (keys["a"] || keys["ArrowLeft"]) dx -= 1;
+    if (keys["w"] || keys["ArrowUp"])    dy -= 1;
+    if (keys["s"] || keys["ArrowDown"])  dy += 1;
+    if (keys["a"] || keys["ArrowLeft"])  dx -= 1;
     if (keys["d"] || keys["ArrowRight"]) dx += 1;
 
     let newX = myPlayer.x + dx * myPlayer.speed;
     let newY = myPlayer.y + dy * myPlayer.speed;
 
-    if (!collides(newX, myPlayer.y)) {
-        myPlayer.x = newX;
-    }
+    if (!collides(newX, myPlayer.y)) myPlayer.x = newX;
+    if (!collides(myPlayer.x, newY)) myPlayer.y = newY;
 
-    if (!collides(myPlayer.x, newY)) {
-        myPlayer.y = newY;
-    }
-
-    socket.emit("move", {
-        id,
-        x: myPlayer.x,
-        y: myPlayer.y
-    });
+    socket.emit("move", { id, x: myPlayer.x, y: myPlayer.y });
 }
 
-// SMOOTH
 function smooth() {
     for (let p in players) {
         if (!renderPlayers[p]) continue;
-
         renderPlayers[p].x = lerp(renderPlayers[p].x, players[p].x, 0.15);
         renderPlayers[p].y = lerp(renderPlayers[p].y, players[p].y, 0.15);
     }
 }
 
-// PLACE WALL
+// Place wall in the direction the player is facing
 function placeWall() {
-    socket.emit("place_wall", {
-        x: myPlayer.x,
-        y: myPlayer.y - 40
-    });
+    let wx, wy, ww, wh;
+    const px = myPlayer.x, py = myPlayer.y;
+
+    if (facing === "up")    { wx = px - 25; wy = py - 30; ww = 80; wh = 20; }
+    if (facing === "down")  { wx = px - 25; wy = py + 35; ww = 80; wh = 20; }
+    if (facing === "left")  { wx = px - 30; wy = py - 25; ww = 20; wh = 80; }
+    if (facing === "right") { wx = px + 35; wy = py - 25; ww = 20; wh = 80; }
+
+    socket.emit("place_wall", { x: wx, y: wy, w: ww, h: wh });
 }
 
-// DRAW
+// Clear all walls
+function clearWalls() {
+    socket.emit("clear_walls");
+}
+
 function draw() {
     ctx.fillStyle = "black";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // walls
+    // Draw walls
     ctx.fillStyle = "gray";
-    for (let w of walls) {
-        ctx.fillRect(w.x, w.y, w.w, w.h);
-    }
+    for (let w of walls) ctx.fillRect(w.x, w.y, w.w, w.h);
 
-    // players
+    // Draw facing indicator arrow above/beside player
     for (let p in players) {
         let r = renderPlayers[p] || players[p];
-
         ctx.fillStyle = (p === id) ? "lime" : "red";
         ctx.fillRect(r.x, r.y, 30, 30);
 
@@ -204,9 +153,17 @@ function draw() {
         ctx.textAlign = "center";
         ctx.fillText(players[p].name, r.x + 15, r.y - 10);
     }
+
+    // Show facing direction for local player
+    if (started) {
+        const arrows = { up: "▲", down: "▼", left: "◀", right: "▶" };
+        ctx.fillStyle = "yellow";
+        ctx.font = "16px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(arrows[facing], myPlayer.x + 15, myPlayer.y + 20);
+    }
 }
 
-// LOOP
 function loop() {
     update();
     smooth();
@@ -215,7 +172,6 @@ function loop() {
 }
 
 loop();
-
 </script>
 </body>
 </html>
