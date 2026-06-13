@@ -5,14 +5,10 @@ import os
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "secret"
 
-# gevent-compatible SocketIO setup
-socketio = SocketIO(
-    app,
-    cors_allowed_origins="*",
-    async_mode="gevent"
-)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
 
 players = {}
+walls = []
 
 @app.route("/")
 def home():
@@ -21,7 +17,7 @@ def home():
 
 @socketio.on("join")
 def join(data):
-    sid = request.sid  # use real socket id
+    sid = request.sid
 
     players[sid] = {
         "name": data.get("name", "Player"),
@@ -30,6 +26,7 @@ def join(data):
     }
 
     emit("players_update", players, broadcast=True)
+    emit("walls_update", walls, broadcast=True)
 
 
 @socketio.on("move")
@@ -43,6 +40,18 @@ def move(data):
     emit("players_update", players, broadcast=True)
 
 
+@socketio.on("place_wall")
+def place_wall(data):
+    walls.append({
+        "x": data["x"],
+        "y": data["y"],
+        "w": 80,
+        "h": 20
+    })
+
+    emit("walls_update", walls, broadcast=True)
+
+
 @socketio.on("disconnect")
 def disconnect():
     sid = request.sid
@@ -53,7 +62,6 @@ def disconnect():
     emit("players_update", players, broadcast=True)
 
 
-# Render-safe run (IMPORTANT)
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     socketio.run(app, host="0.0.0.0", port=port)

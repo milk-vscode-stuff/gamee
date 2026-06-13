@@ -30,8 +30,8 @@
         input, button {
             padding: 10px;
             margin: 5px;
-            border-radius: 6px;
             border: none;
+            border-radius: 6px;
         }
 
         button {
@@ -66,6 +66,7 @@ let id = Math.random().toString(36).substr(2);
 
 let players = {};
 let renderPlayers = {};
+let walls = [];
 
 let started = false;
 let myName = "";
@@ -74,10 +75,18 @@ let myPlayer = { x: 200, y: 200, speed: 4 };
 
 const keys = {};
 
-window.addEventListener("keydown", e => keys[e.key] = true);
+// KEY INPUT
+window.addEventListener("keydown", (e) => {
+    keys[e.key] = true;
+
+    if (e.key.toLowerCase() === "u") {
+        placeWall();
+    }
+});
+
 window.addEventListener("keyup", e => keys[e.key] = false);
 
-// JOIN GAME
+// JOIN
 function start() {
     myName = document.getElementById("nameInput").value;
     document.getElementById("menu").style.display = "none";
@@ -86,7 +95,7 @@ function start() {
     started = true;
 }
 
-// SERVER UPDATE
+// RECEIVE PLAYERS
 socket.on("players_update", (data) => {
     players = data;
 
@@ -100,12 +109,32 @@ socket.on("players_update", (data) => {
     }
 });
 
-// LERP FUNCTION
+// RECEIVE WALLS
+socket.on("walls_update", (data) => {
+    walls = data;
+});
+
+// LERP
 function lerp(a, b, t) {
     return a + (b - a) * t;
 }
 
-// UPDATE MOVEMENT
+// COLLISION
+function collides(x, y) {
+    for (let w of walls) {
+        if (
+            x < w.x + w.w &&
+            x + 30 > w.x &&
+            y < w.y + w.h &&
+            y + 30 > w.y
+        ) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// MOVE
 function update() {
     if (!started) return;
 
@@ -116,8 +145,16 @@ function update() {
     if (keys["a"] || keys["ArrowLeft"]) dx -= 1;
     if (keys["d"] || keys["ArrowRight"]) dx += 1;
 
-    myPlayer.x += dx * myPlayer.speed;
-    myPlayer.y += dy * myPlayer.speed;
+    let newX = myPlayer.x + dx * myPlayer.speed;
+    let newY = myPlayer.y + dy * myPlayer.speed;
+
+    if (!collides(newX, myPlayer.y)) {
+        myPlayer.x = newX;
+    }
+
+    if (!collides(myPlayer.x, newY)) {
+        myPlayer.y = newY;
+    }
 
     socket.emit("move", {
         id,
@@ -126,7 +163,7 @@ function update() {
     });
 }
 
-// SMOOTHING
+// SMOOTH
 function smooth() {
     for (let p in players) {
         if (!renderPlayers[p]) continue;
@@ -136,13 +173,27 @@ function smooth() {
     }
 }
 
+// PLACE WALL
+function placeWall() {
+    socket.emit("place_wall", {
+        x: myPlayer.x,
+        y: myPlayer.y - 40
+    });
+}
+
 // DRAW
 function draw() {
     ctx.fillStyle = "black";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    for (let p in players) {
+    // walls
+    ctx.fillStyle = "gray";
+    for (let w of walls) {
+        ctx.fillRect(w.x, w.y, w.w, w.h);
+    }
 
+    // players
+    for (let p in players) {
         let r = renderPlayers[p] || players[p];
 
         ctx.fillStyle = (p === id) ? "lime" : "red";
