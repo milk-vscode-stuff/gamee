@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Multiplayer Game</title>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial;
+            background: black;
+        }
+
+        canvas {
+            display: block;
+            background: black;
+        }
+
+        /* MENU */
+        #menu {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: black;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+        }
+
+        input {
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 6px;
+            border: none;
+            outline: none;
+            margin-bottom: 10px;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            background: #5865f2;
+            color: white;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #4752c4;
+        }
+
+        /* JOYSTICK */
+        #joystick {
+            position: absolute;
+            bottom: 60px;
+            left: 60px;
+            width: 120px;
+            height: 120px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 50%;
+            display: none;
+        }
+
+        #stick {
+            position: absolute;
+            width: 50px;
+            height: 50px;
+            background: rgba(255,255,255,0.4);
+            border-radius: 50%;
+            top: 35px;
+            left: 35px;
+        }
+    </style>
+</head>
+
+<body>
+
+<div id="menu">
+    <h2>Enter Username</h2>
+    <input id="nameInput" placeholder="Your name">
+    <button onclick="startGame()">Finish</button>
+</div>
+
+<canvas id="game"></canvas>
+
+<!-- joystick -->
+<div id="joystick">
+    <div id="stick"></div>
+</div>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
+<script>
+const socket = io();
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+let players = {};
+let id = Math.random().toString(36).substring(2);
+
+let started = false;
+let myName = "";
+
+let myPlayer = {
+    x: 200,
+    y: 200,
+    speed: 4
+};
+
+// MENU
+function startGame() {
+    const input = document.getElementById("nameInput");
+    if (input.value.trim() === "") return;
+
+    myName = input.value;
+
+    document.getElementById("menu").style.display = "none";
+
+    socket.emit("join", {
+        id,
+        name: myName
+    });
+
+    started = true;
+}
+
+// SERVER DATA
+socket.on("players_update", (data) => {
+    players = data;
+});
+
+// KEYBOARD
+const keys = {};
+window.addEventListener("keydown", e => keys[e.key] = true);
+window.addEventListener("keyup", e => keys[e.key] = false);
+
+// MOBILE DETECT
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+if (isMobile) {
+    document.getElementById("joystick").style.display = "block";
+}
+
+// JOYSTICK
+const joystick = document.getElementById("joystick");
+const stick = document.getElementById("stick");
+
+let joyX = 0;
+let joyY = 0;
+let active = false;
+
+joystick.addEventListener("touchstart", () => active = true);
+
+joystick.addEventListener("touchmove", (e) => {
+    if (!active) return;
+
+    const rect = joystick.getBoundingClientRect();
+    const t = e.touches[0];
+
+    let x = t.clientX - rect.left - rect.width / 2;
+    let y = t.clientY - rect.top - rect.height / 2;
+
+    const max = 40;
+
+    x = Math.max(-max, Math.min(max, x));
+    y = Math.max(-max, Math.min(max, y));
+
+    joyX = x / max;
+    joyY = y / max;
+
+    stick.style.transform = `translate(${x}px, ${y}px)`;
+});
+
+joystick.addEventListener("touchend", () => {
+    active = false;
+    joyX = 0;
+    joyY = 0;
+    stick.style.transform = "translate(0px, 0px)";
+});
+
+// UPDATE
+function update() {
+    if (!started) return;
+
+    let dx = 0;
+    let dy = 0;
+
+    // keyboard
+    if (keys["w"] || keys["ArrowUp"]) dy -= 1;
+    if (keys["s"] || keys["ArrowDown"]) dy += 1;
+    if (keys["a"] || keys["ArrowLeft"]) dx -= 1;
+    if (keys["d"] || keys["ArrowRight"]) dx += 1;
+
+    // joystick
+    dx += joyX;
+    dy += joyY;
+
+    myPlayer.x += dx * myPlayer.speed;
+    myPlayer.y += dy * myPlayer.speed;
+
+    socket.emit("move", {
+        id,
+        x: myPlayer.x,
+        y: myPlayer.y
+    });
+}
+
+// DRAW
+function draw() {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let p in players) {
+        let pl = players[p];
+
+        ctx.fillStyle = (p === id) ? "#00ff6a" : "#ff4d4d";
+        ctx.fillRect(pl.x, pl.y, 30, 30);
+
+        // name background
+        ctx.fillStyle = "rgba(0,0,0,0.6)";
+        ctx.fillRect(pl.x - 20, pl.y - 30, 90, 18);
+
+        // name text
+        ctx.fillStyle = "white";
+        ctx.font = "14px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(pl.name, pl.x + 15, pl.y - 18);
+    }
+}
+
+// LOOP
+function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+
+</body>
+</html>
