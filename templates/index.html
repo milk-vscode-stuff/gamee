@@ -12,6 +12,23 @@
         }
         input, button { padding: 10px; margin: 5px; border: none; border-radius: 6px; }
         button { background: #5865f2; color: white; cursor: pointer; }
+
+        #boost-bar-wrap {
+            position: absolute; bottom: 20px; left: 50%;
+            transform: translateX(-50%);
+            display: flex; flex-direction: column; align-items: center; gap: 4px;
+        }
+        #boost-label { color: white; font-size: 13px; letter-spacing: 1px; }
+        #boost-bar-bg {
+            width: 160px; height: 12px;
+            background: #333; border-radius: 6px; overflow: hidden;
+        }
+        #boost-bar {
+            height: 100%; width: 100%;
+            background: linear-gradient(90deg, #f90, #ffe000);
+            border-radius: 6px;
+            transition: width 0.05s linear;
+        }
     </style>
 </head>
 <body>
@@ -23,6 +40,12 @@
 </div>
 
 <canvas id="c"></canvas>
+
+<!-- Speed boost HUD -->
+<div id="boost-bar-wrap">
+    <div id="boost-label">⚡ BOOST [Y]</div>
+    <div id="boost-bar-bg"><div id="boost-bar"></div></div>
+</div>
 
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script>
@@ -40,27 +63,103 @@ let renderPlayers = {};
 let walls = [];
 let started = false;
 let myName = "";
-let myPlayer = { x: 200, y: 200, speed: 4 };
-const keys = {};
 
-// Track which direction the player is facing (default: up)
+const BASE_SPEED = 4;
+const BOOST_SPEED = 10;
+const BOOST_DURATION = 1500;   // ms the boost lasts
+const BOOST_COOLDOWN = 4000;   // ms before you can boost again
+
+let myPlayer = { x: 200, y: 200, speed: BASE_SPEED };
+
+let boosting = false;
+let boostCooldown = false;
+let boostTimer = null;
+let cooldownTimer = null;
+let boostStartTime = null;
+
+const keys = {};
 let facing = "up";
+
+// Distinct bright colors for walls
+const WALL_COLORS = [
+    "#e74c3c","#e67e22","#f1c40f","#2ecc71",
+    "#1abc9c","#3498db","#9b59b6","#e91e63",
+    "#00bcd4","#ff5722","#8bc34a","#ff9800"
+];
+let wallColorIndex = 0;
+
+function nextWallColor() {
+    const c = WALL_COLORS[wallColorIndex % WALL_COLORS.length];
+    wallColorIndex++;
+    return c;
+}
 
 window.addEventListener("keydown", (e) => {
     keys[e.key] = true;
 
-    // Update facing direction when a movement key is pressed
     if (e.key === "w" || e.key === "ArrowUp")    facing = "up";
     if (e.key === "s" || e.key === "ArrowDown")  facing = "down";
     if (e.key === "a" || e.key === "ArrowLeft")  facing = "left";
     if (e.key === "d" || e.key === "ArrowRight") facing = "right";
 
     if (e.key.toLowerCase() === "u") placeWall();
-    if (e.key.toLowerCase() === "k") clearWalls();  // ← NEW
+    if (e.key.toLowerCase() === "k") clearWalls();
+    if (e.key.toLowerCase() === "y") activateBoost();
 });
 
 window.addEventListener("keyup", e => keys[e.key] = false);
 
+// ── BOOST ─────────────────────────────────────────────────────────────
+function activateBoost() {
+    if (boosting || boostCooldown || !started) return;
+
+    boosting = true;
+    myPlayer.speed = BOOST_SPEED;
+    boostStartTime = performance.now();
+
+    // Animate the bar draining
+    updateBoostBar();
+
+    boostTimer = setTimeout(() => {
+        boosting = false;
+        myPlayer.speed = BASE_SPEED;
+        boostCooldown = true;
+        boostStartTime = performance.now();
+        updateBoostBar();
+
+        cooldownTimer = setTimeout(() => {
+            boostCooldown = false;
+            document.getElementById("boost-bar").style.width = "100%";
+            document.getElementById("boost-bar").style.background =
+                "linear-gradient(90deg, #f90, #ffe000)";
+        }, BOOST_COOLDOWN);
+    }, BOOST_DURATION);
+}
+
+function updateBoostBar() {
+    const bar = document.getElementById("boost-bar");
+
+    function frame() {
+        const now = performance.now();
+        const elapsed = now - boostStartTime;
+
+        if (boosting) {
+            const pct = Math.max(0, 1 - elapsed / BOOST_DURATION);
+            bar.style.width = (pct * 100) + "%";
+            bar.style.background = "linear-gradient(90deg, #f90, #ffe000)";
+            if (pct > 0) requestAnimationFrame(frame);
+        } else if (boostCooldown) {
+            const pct = Math.min(1, elapsed / BOOST_COOLDOWN);
+            bar.style.width = (pct * 100) + "%";
+            bar.style.background = "linear-gradient(90deg, #555, #888)";
+            if (pct < 1) requestAnimationFrame(frame);
+        }
+    }
+
+    requestAnimationFrame(frame);
+}
+
+// ── NETWORKING ────────────────────────────────────────────────────────
 function start() {
     myName = document.getElementById("nameInput").value;
     document.getElementById("menu").style.display = "none";
@@ -71,9 +170,8 @@ function start() {
 socket.on("players_update", (data) => {
     players = data;
     for (let p in players) {
-        if (!renderPlayers[p]) {
+        if (!renderPlayers[p])
             renderPlayers[p] = { x: players[p].x, y: players[p].y };
-        }
     }
 });
 
@@ -81,15 +179,18 @@ socket.on("walls_update", (data) => {
     walls = data;
 });
 
+// ── HELPERS ───────────────────────────────────────────────────────────
 function lerp(a, b, t) { return a + (b - a) * t; }
 
 function collides(x, y) {
     for (let w of walls) {
-        if (x < w.x + w.w && x + 30 > w.x && y < w.y + w.h && y + 30 > w.y) return true;
+        if (x < w.x + w.w && x + 30 > w.x && y < w.y + w.h && y + 30 > w.y)
+            return true;
     }
     return false;
 }
 
+// ── UPDATE ────────────────────────────────────────────────────────────
 function update() {
     if (!started) return;
 
@@ -116,7 +217,7 @@ function smooth() {
     }
 }
 
-// Place wall in the direction the player is facing
+// ── WALL PLACEMENT ────────────────────────────────────────────────────
 function placeWall() {
     let wx, wy, ww, wh;
     const px = myPlayer.x, py = myPlayer.y;
@@ -126,27 +227,37 @@ function placeWall() {
     if (facing === "left")  { wx = px - 30; wy = py - 25; ww = 20; wh = 80; }
     if (facing === "right") { wx = px + 35; wy = py - 25; ww = 20; wh = 80; }
 
-    socket.emit("place_wall", { x: wx, y: wy, w: ww, h: wh });
+    socket.emit("place_wall", { x: wx, y: wy, w: ww, h: wh, color: nextWallColor() });
 }
 
-// Clear all walls
 function clearWalls() {
     socket.emit("clear_walls");
 }
 
+// ── DRAW ──────────────────────────────────────────────────────────────
 function draw() {
     ctx.fillStyle = "black";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw walls
-    ctx.fillStyle = "gray";
-    for (let w of walls) ctx.fillRect(w.x, w.y, w.w, w.h);
+    // Walls — each uses its stored color
+    for (let w of walls) {
+        ctx.fillStyle = w.color || "#888";
+        ctx.fillRect(w.x, w.y, w.w, w.h);
+    }
 
-    // Draw facing indicator arrow above/beside player
+    // Players
     for (let p in players) {
         let r = renderPlayers[p] || players[p];
+
+        // Boost glow for local player
+        if (p === id && boosting) {
+            ctx.shadowColor = "#ffe000";
+            ctx.shadowBlur = 18;
+        }
+
         ctx.fillStyle = (p === id) ? "lime" : "red";
         ctx.fillRect(r.x, r.y, 30, 30);
+        ctx.shadowBlur = 0;
 
         ctx.fillStyle = "white";
         ctx.font = "14px Arial";
@@ -154,16 +265,17 @@ function draw() {
         ctx.fillText(players[p].name, r.x + 15, r.y - 10);
     }
 
-    // Show facing direction for local player
+    // Facing arrow
     if (started) {
         const arrows = { up: "▲", down: "▼", left: "◀", right: "▶" };
-        ctx.fillStyle = "yellow";
+        ctx.fillStyle = boosting ? "#ffe000" : "yellow";
         ctx.font = "16px Arial";
         ctx.textAlign = "center";
         ctx.fillText(arrows[facing], myPlayer.x + 15, myPlayer.y + 20);
     }
 }
 
+// ── LOOP ──────────────────────────────────────────────────────────────
 function loop() {
     update();
     smooth();

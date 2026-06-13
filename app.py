@@ -35,11 +35,12 @@ def place_wall(data):
         "x": data["x"],
         "y": data["y"],
         "w": data.get("w", 80),
-        "h": data.get("h", 20)
+        "h": data.get("h", 20),
+        "color": data.get("color", "#888888")   # ← store color
     })
     emit("walls_update", walls, broadcast=True)
 
-@socketio.on("clear_walls")          # ← NEW
+@socketio.on("clear_walls")
 def clear_walls():
     walls.clear()
     emit("walls_update", walls, broadcast=True)
