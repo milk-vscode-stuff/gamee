@@ -2,13 +2,12 @@
 <html>
 <head>
     <title>Multiplayer Game</title>
-
     <style>
         body {
             margin: 0;
             overflow: hidden;
-            font-family: Arial;
             background: black;
+            font-family: Arial;
         }
 
         canvas {
@@ -16,7 +15,6 @@
             background: black;
         }
 
-        /* MENU */
         #menu {
             position: absolute;
             width: 100%;
@@ -29,48 +27,17 @@
             color: white;
         }
 
-        input {
+        input, button {
             padding: 10px;
-            font-size: 16px;
+            margin: 5px;
             border-radius: 6px;
             border: none;
-            outline: none;
-            margin-bottom: 10px;
         }
 
         button {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 6px;
             background: #5865f2;
             color: white;
             cursor: pointer;
-        }
-
-        button:hover {
-            background: #4752c4;
-        }
-
-        /* JOYSTICK */
-        #joystick {
-            position: absolute;
-            bottom: 60px;
-            left: 60px;
-            width: 120px;
-            height: 120px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 50%;
-            display: none;
-        }
-
-        #stick {
-            position: absolute;
-            width: 50px;
-            height: 50px;
-            background: rgba(255,255,255,0.4);
-            border-radius: 50%;
-            top: 35px;
-            left: 35px;
         }
     </style>
 </head>
@@ -78,128 +45,76 @@
 <body>
 
 <div id="menu">
-    <h2>Enter Username</h2>
-    <input id="nameInput" placeholder="Your name">
-    <button onclick="startGame()">Finish</button>
+    <h2>Enter Name</h2>
+    <input id="nameInput" placeholder="name">
+    <button onclick="start()">Start</button>
 </div>
 
-<canvas id="game"></canvas>
-
-<!-- joystick -->
-<div id="joystick">
-    <div id="stick"></div>
-</div>
+<canvas id="c"></canvas>
 
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-
 <script>
-const socket = io();
 
-const canvas = document.getElementById("game");
+const socket = io();
+const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d");
 
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+canvas.width = innerWidth;
+canvas.height = innerHeight;
+
+let id = Math.random().toString(36).substr(2);
 
 let players = {};
-let id = Math.random().toString(36).substring(2);
+let renderPlayers = {};
 
 let started = false;
 let myName = "";
 
-let myPlayer = {
-    x: 200,
-    y: 200,
-    speed: 4
-};
+let myPlayer = { x: 200, y: 200, speed: 4 };
 
-// MENU
-function startGame() {
-    const input = document.getElementById("nameInput");
-    if (input.value.trim() === "") return;
-
-    myName = input.value;
-
-    document.getElementById("menu").style.display = "none";
-
-    socket.emit("join", {
-        id,
-        name: myName
-    });
-
-    started = true;
-}
-
-// SERVER DATA
-socket.on("players_update", (data) => {
-    players = data;
-});
-
-// KEYBOARD
 const keys = {};
+
 window.addEventListener("keydown", e => keys[e.key] = true);
 window.addEventListener("keyup", e => keys[e.key] = false);
 
-// MOBILE DETECT
-const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+// JOIN GAME
+function start() {
+    myName = document.getElementById("nameInput").value;
+    document.getElementById("menu").style.display = "none";
 
-if (isMobile) {
-    document.getElementById("joystick").style.display = "block";
+    socket.emit("join", { id, name: myName });
+    started = true;
 }
 
-// JOYSTICK
-const joystick = document.getElementById("joystick");
-const stick = document.getElementById("stick");
+// SERVER UPDATE
+socket.on("players_update", (data) => {
+    players = data;
 
-let joyX = 0;
-let joyY = 0;
-let active = false;
-
-joystick.addEventListener("touchstart", () => active = true);
-
-joystick.addEventListener("touchmove", (e) => {
-    if (!active) return;
-
-    const rect = joystick.getBoundingClientRect();
-    const t = e.touches[0];
-
-    let x = t.clientX - rect.left - rect.width / 2;
-    let y = t.clientY - rect.top - rect.height / 2;
-
-    const max = 40;
-
-    x = Math.max(-max, Math.min(max, x));
-    y = Math.max(-max, Math.min(max, y));
-
-    joyX = x / max;
-    joyY = y / max;
-
-    stick.style.transform = `translate(${x}px, ${y}px)`;
+    for (let p in players) {
+        if (!renderPlayers[p]) {
+            renderPlayers[p] = {
+                x: players[p].x,
+                y: players[p].y
+            };
+        }
+    }
 });
 
-joystick.addEventListener("touchend", () => {
-    active = false;
-    joyX = 0;
-    joyY = 0;
-    stick.style.transform = "translate(0px, 0px)";
-});
+// LERP FUNCTION
+function lerp(a, b, t) {
+    return a + (b - a) * t;
+}
 
-// UPDATE
+// UPDATE MOVEMENT
 function update() {
     if (!started) return;
 
-    let dx = 0;
-    let dy = 0;
+    let dx = 0, dy = 0;
 
-    // keyboard
     if (keys["w"] || keys["ArrowUp"]) dy -= 1;
     if (keys["s"] || keys["ArrowDown"]) dy += 1;
     if (keys["a"] || keys["ArrowLeft"]) dx -= 1;
     if (keys["d"] || keys["ArrowRight"]) dx += 1;
-
-    // joystick
-    dx += joyX;
-    dy += joyY;
 
     myPlayer.x += dx * myPlayer.speed;
     myPlayer.y += dy * myPlayer.speed;
@@ -211,38 +126,45 @@ function update() {
     });
 }
 
+// SMOOTHING
+function smooth() {
+    for (let p in players) {
+        if (!renderPlayers[p]) continue;
+
+        renderPlayers[p].x = lerp(renderPlayers[p].x, players[p].x, 0.15);
+        renderPlayers[p].y = lerp(renderPlayers[p].y, players[p].y, 0.15);
+    }
+}
+
 // DRAW
 function draw() {
-    ctx.fillStyle = "#000";
+    ctx.fillStyle = "black";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     for (let p in players) {
-        let pl = players[p];
 
-        ctx.fillStyle = (p === id) ? "#00ff6a" : "#ff4d4d";
-        ctx.fillRect(pl.x, pl.y, 30, 30);
+        let r = renderPlayers[p] || players[p];
 
-        // name background
-        ctx.fillStyle = "rgba(0,0,0,0.6)";
-        ctx.fillRect(pl.x - 20, pl.y - 30, 90, 18);
+        ctx.fillStyle = (p === id) ? "lime" : "red";
+        ctx.fillRect(r.x, r.y, 30, 30);
 
-        // name text
         ctx.fillStyle = "white";
         ctx.font = "14px Arial";
         ctx.textAlign = "center";
-        ctx.fillText(pl.name, pl.x + 15, pl.y - 18);
+        ctx.fillText(players[p].name, r.x + 15, r.y - 10);
     }
 }
 
 // LOOP
 function loop() {
     update();
+    smooth();
     draw();
     requestAnimationFrame(loop);
 }
 
 loop();
-</script>
 
+</script>
 </body>
 </html>
